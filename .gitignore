@@ -1,6 +1,10 @@
 # Dependencies
 node_modules/
 
+# Python
+__pycache__/
+*.pyc
+
 # Browser session data (contains login credentials)
 scraping/.cloak_profile/
 scraping/boss_cookies.json
