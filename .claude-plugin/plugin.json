@@ -7,5 +7,14 @@
   },
   "license": "AGPL-3.0",
   "keywords": ["job", "matching", "resume", "scraping", "scoring", "boss-zhipin"],
-  "skills": ["./"]
+  "skills": ["./"],
+  "mcpServers": {
+    "tencent-map": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-tencent-map"],
+      "env": {
+        "TENCENT_MAP_KEY": ""
+      }
+    }
+  }
 }

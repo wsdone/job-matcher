@@ -32,6 +32,19 @@ cd job-matcher
 pip install cloakbrowser openpyxl
 ```
 
+### 可选：配置地图 MCP（通勤计算）
+
+安装腾讯地图 MCP Server 以启用通勤距离计算：
+
+```bash
+# 在 Claude Code 中添加 MCP Server
+claude mcp add tencent-map -- npx -y @modelcontextprotocol/server-tencent-map
+# 设置环境变量
+export TENCENT_MAP_KEY="你的腾讯地图Key"
+```
+
+不配置地图 MCP 也不影响核心功能，通勤评分会使用默认中性分。
+
 ## 工作流程
 
 ## 平台支持状态

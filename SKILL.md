@@ -67,10 +67,10 @@ python3 scraping/boss_cloak.py --keyword "测试" --city "北京" --pages 1 --no
 ### Phase 4: 通勤配置（可选）
 
 用 AskUserQuestion 询问用户是否配置通勤计算：
-- 如果用户提供了住址，询问地图 API 配置：
-  - **腾讯地图**: https://lbs.qq.com/dev/console/application/mine 获取 Key
-  - **高德地图**: https://lbs.amap.com/dev/key/app 获取 Key
-- 如果用户不配置地图 API，通勤评分使用默认中性分（8/15），不影响其他维度
+- 如果用户提供了住址，检查是否已配置地图 MCP 或 API Key：
+  - **推荐：腾讯地图 MCP** — 在 Claude Code 中配置 `tencent-map` MCP Server（使用 `@modelcontextprotocol/server-tencent-map`），通勤计算通过 MCP 调用，无需额外脚本
+  - **备选：地图 API Key** — 腾讯地图（https://lbs.qq.com/dev/console/application/mine）或 高德地图（https://lbs.amap.com/dev/key/app），通过 `scripts/commute.py` 调用
+- 如果用户不配置地图，通勤评分使用默认中性分（8/15），不影响其他维度
 
 ### Phase 5: 自动爬取
 
