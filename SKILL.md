@@ -57,18 +57,18 @@ python3 scraping/boss_cloak.py --keyword "测试" --city "北京" --pages 1 --no
 
 ### Phase 5: 自动爬取
 
-对用户选择的平台，用 AI 确定的关键词逐个爬取。每次只能运行一个爬虫（共用浏览器 profile）。
+对用户选择的平台，用 AI 确定的关键词逐个爬取。每次只能运行一个爬虫（共用浏览器 profile）。**默认抓取 JD 详情页**，获取完整职位描述和公司信息。
 
 ```bash
-# 每个平台的爬取命令
-python3 scraping/boss_cloak.py --keyword "关键词" --city "城市" --pages 3 --no-detail
-python3 scraping/liepin_cloak.py --keyword "关键词" --city "城市" --pages 3 --no-detail
-python3 scraping/zhaopin_cloak.py --keyword "关键词" --city "城市" --pages 3 --no-detail
-python3 scraping/51job_cloak.py --keyword "关键词" --city "城市" --pages 3 --no-detail
+# 每个平台的爬取命令（默认抓详情）
+python3 scraping/boss_cloak.py --keyword "关键词" --city "城市" --pages 3
+python3 scraping/liepin_cloak.py --keyword "关键词" --city "城市" --pages 3
+python3 scraping/zhaopin_cloak.py --keyword "关键词" --city "城市" --pages 3
+python3 scraping/51job_cloak.py --keyword "关键词" --city "城市" --pages 3
 ```
 
 - AI 根据简历自主确定多个搜索关键词，逐个搜索
-- `--no-detail` 先只抓列表，后续对精选岗位抓详情
+- 每个职位都会访问详情页提取 JD 文本、公司信息、工作地址
 
 搜索完成后合并去重：
 
@@ -78,7 +78,7 @@ python3 scraping/51job_cloak.py --keyword "关键词" --city "城市" --pages 3 
 
 ### Phase 6: AI 筛选
 
-AI 根据简历内容，从所有爬取结果中筛选真正匹配的岗位。筛选标准由 AI 判断，不是硬编码规则。
+AI 根据简历内容和 JD 详情，从所有爬取结果中筛选真正匹配的岗位。筛选标准由 AI 判断，不是硬编码规则。
 
 ### Phase 7: 评分 & 输出 Excel
 
@@ -125,15 +125,36 @@ python3 scripts/scoring.py \
 
 输出 Excel 包含：排名、岗位名称、公司、薪资、地点、各维度评分、通勤时间/距离、匹配技能、岗位链接等。
 
-### Phase 8: (可选) 抓取 JD 详情
+### Phase 8: 推荐报告
 
-对 Excel 中高分岗位，去掉 `--no-detail` 抓取完整 JD：
+AI 根据评分结果和 JD 详情，为用户生成推荐报告，重点推荐 80 分以上的岗位，给出匹配理由和投递建议。
+
+## 依赖安装
+
+首次使用前需安装以下依赖：
 
 ```bash
-python3 scraping/boss_cloak.py --keyword "关键词" --city "城市" --pages 1
+# 必需依赖
+pip3 install cloakbrowser openpyxl
+
+# 安装 CloakBrowser 的定制 Chromium 浏览器（首次运行自动触发，也可手动安装）
+python3 -c "from cloakbrowser import ensure_binary; ensure_binary()"
+
+# CloakBrowser 依赖 Playwright，安装时自动拉取
+pip3 install playwright
 ```
 
-AI 阅读 JD 详情后给出更精准的匹配建议。
+| 依赖 | 用途 | 安装命令 |
+|------|------|---------|
+| `cloakbrowser` >= 0.3.27 | 反检测浏览器（CloakBrowser） | `pip3 install cloakbrowser` |
+| `openpyxl` | Excel 报告生成 | `pip3 install openpyxl` |
+| `playwright` | 浏览器自动化（cloakbrowser 依赖） | `pip3 install playwright` |
+| Python >= 3.10 | 运行环境 | 系统自带或 pyenv |
+
+注意：
+- CloakBrowser 首次运行会下载定制的 Chromium 二进制文件（~200MB）
+- 不需要 `npm install`，不依赖 Node.js
+- 不需要安装 Playwright 的浏览器（`playwright install`），CloakBrowser 自带定制版
 
 ## 平台支持
 
@@ -151,6 +172,7 @@ AI 阅读 JD 详情后给出更精准的匹配建议。
 ```
 job-matcher/
 ├── SKILL.md                    # 本文件：方法论
+├── requirements.txt            # Python 依赖
 ├── config/
 │   └── profile.yaml.example    # 配置模板
 ├── scraping/
