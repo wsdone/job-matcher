@@ -17,7 +17,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(os.path.dirname(BASE_DIR), "data")
 PROFILE_DIR = os.path.join(BASE_DIR, ".cloak_profile_51job")
 COOKIES_FILE = os.path.join(BASE_DIR, "51job_cookies.json")
-FINGERPRINT_SEED = "42072"
+FINGERPRINT_SEED = str(hash(PROFILE_DIR) % 100000)  # 每个 profile 自动生成唯一指纹
 
 JOB51_URL = "https://search.51job.com"
 
@@ -305,7 +305,16 @@ def run(keyword="Java开发", city="北京", pages=3, fetch_detail=True, debug=F
             ctx.close()
             return []
     elif not _is_logged_in(ctx):
-        print("[*] 未检测到登录态，尝试继续...")
+        print("[!] 未登录，请先登录前程无忧")
+        page.goto("https://login.51job.com/", wait_until="domcontentloaded", timeout=30000)
+        if _wait_for_login(ctx, page):
+            time.sleep(2)
+            page.goto(first_url, wait_until="domcontentloaded", timeout=60000)
+            time.sleep(5)
+        else:
+            print("[-] 登录超时，尝试继续无登录爬取...")
+            page.goto(first_url, wait_until="domcontentloaded", timeout=60000)
+            time.sleep(5)
 
     # 逐页爬取
     all_jobs = []

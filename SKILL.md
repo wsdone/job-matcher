@@ -23,21 +23,19 @@ description: "智能职位匹配助手 - AI 驱动的简历分析、职位爬取
 
 ### Phase 3: 爬取职位
 
-支持三个平台的爬取脚本（均基于 CloakBrowser 反检测）：
+支持多平台的爬取脚本（均基于 CloakBrowser 反检测）：
 
-| 平台 | 脚本 | 用法 |
-|------|------|------|
-| Boss直聘 | `scraping/boss_cloak.py` | `--keyword --city --pages --salary --experience --degree` |
-| 猎聘 | `scraping/liepin_cloak.py` | `--keyword --city --pages --debug` |
-| 智联招聘 | `scraping/zhaopin_cloak.py` | `--keyword --city --pages --debug` |
-| 前程无忧 | `scraping/51job_cloak.py` | `--keyword --city --pages --debug` |
+| 平台 | 脚本 | 状态 | 需要登录 |
+|------|------|------|---------|
+| Boss直聘 | `scraping/boss_cloak.py` | 已验证可用 | 是（扫码） |
+| 猎聘 | `scraping/liepin_cloak.py` | 已验证可用 | 否（登录后更完整） |
+| 智联招聘 | `scraping/zhaopin_cloak.py` | 实验性 | 待验证 |
+| 前程无忧 | `scraping/51job_cloak.py` | 暂不可用 | - |
 
 ```bash
-# 示例：先只抓列表（--no-detail），后续对精选岗位抓详情
+# Boss直聘 + 猎聘为主力平台
 python3 scraping/boss_cloak.py --keyword "关键词" --city "城市" --pages 3 --no-detail
 python3 scraping/liepin_cloak.py --keyword "关键词" --city "城市" --pages 3 --no-detail
-python3 scraping/zhaopin_cloak.py --keyword "关键词" --city "城市" --pages 3 --no-detail
-python3 scraping/51job_cloak.py --keyword "关键词" --city "城市" --pages 3 --no-detail
 ```
 
 - AI 根据简历自主确定多个搜索关键词，逐个搜索

@@ -34,7 +34,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(os.path.dirname(BASE_DIR), "data")
 PROFILE_DIR = os.path.join(BASE_DIR, ".cloak_profile")
 COOKIES_FILE = os.path.join(BASE_DIR, "boss_cookies.json")
-FINGERPRINT_SEED = "42069"
+FINGERPRINT_SEED = str(hash(PROFILE_DIR) % 100000)  # 每个 profile 自动生成唯一指纹
 
 BOSS_URL = "https://www.zhipin.com"
 

@@ -17,7 +17,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(os.path.dirname(BASE_DIR), "data")
 PROFILE_DIR = os.path.join(BASE_DIR, ".cloak_profile_liepin")
 COOKIES_FILE = os.path.join(BASE_DIR, "liepin_cookies.json")
-FINGERPRINT_SEED = "42070"
+FINGERPRINT_SEED = str(hash(PROFILE_DIR) % 100000)  # 每个 profile 自动生成唯一指纹
 
 LIEPIN_URL = "https://www.liepin.com"
 
@@ -71,7 +71,7 @@ def _save_cookies(context):
 def _extract_jobs(page):
     jobs = []
     try:
-        page.wait_for_selector(".job-detail-box, .sojob-item-main, [class*='job-card'], .job-list-box", timeout=15000)
+        page.wait_for_selector(".job-card-pc-container, .job-detail-box", timeout=15000)
     except Exception:
         _save_debug(page, "no_cards")
         return jobs
@@ -81,8 +81,7 @@ def _extract_jobs(page):
         page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
         time.sleep(0.8)
 
-    # 尝试多种选择器
-    cards = page.query_selector_all(".job-detail-box, .sojob-item-main, [class*='job-card']")
+    cards = page.query_selector_all(".job-card-pc-container")
     if not cards:
         _save_debug(page, "empty_cards")
         return jobs
@@ -91,43 +90,59 @@ def _extract_jobs(page):
         try:
             job = {}
 
-            # 标题
-            el = card.query_selector(".job-title, .ellipsis-1, [class*='job-name'], a[title]")
-            job["title"] = el.inner_text().strip() if el else ""
+            # 主链接区
+            job_link = card.query_selector("a[data-nick='job-detail-job-info'], a[href*='liepin.com/job/']")
+            if not job_link:
+                continue
+
+            # 标题: data-nick 链接内的 div[title]
+            el = job_link.query_selector("div[title]")
+            job["title"] = el.get_attribute("title") or el.inner_text().strip() if el else ""
             if not job["title"]:
-                el = card.query_selector("a[href*='job/']")
+                el = job_link.query_selector(".ellipsis-1")
                 job["title"] = el.inner_text().strip() if el else ""
 
-            # 薪资
-            el = card.query_selector(".job-salary, [class*='salary'], .text-warning")
-            job["salary"] = el.inner_text().strip() if el else ""
+            # 薪资: 链接内包含 k/万/薪 的 span
+            job["salary"] = ""
+            for span in job_link.query_selector_all("span"):
+                text = span.inner_text().strip()
+                if text and ("k" in text.lower() or "万" in text or "薪" in text) and "-" in text:
+                    job["salary"] = text
+                    break
 
-            # 公司
-            el = card.query_selector(".company-name, [class*='company-name'] a, .ellipsis-1 a")
-            job["company"] = el.inner_text().strip() if el else ""
-
-            # 地点
-            el = card.query_selector(".job-area, [class*='area'], .job-dq")
-            job["location"] = el.inner_text().strip() if el else ""
+            # 地点: 【城市】括号内的 span.ellipsis-1
+            job["location"] = ""
+            el = card.query_selector("[data-nick='job-detail-job-info'] .ellipsis-1:not([title])")
+            if el:
+                text = el.inner_text().strip()
+                # 排除标题（标题有 title 属性）
+                if text and text != job["title"]:
+                    job["location"] = text
 
             # 链接
-            el = card.query_selector("a[href*='job/'], a[href*='/job']")
-            if el:
-                href = el.get_attribute("href") or ""
-                job["link"] = href if href.startswith("http") else f"{LIEPIN_URL}{href}"
-            else:
-                job["link"] = ""
+            href = job_link.get_attribute("href") or ""
+            job["link"] = href if href.startswith("http") else f"{LIEPIN_URL}{href}"
 
-            # 标签
+            # 公司: data-nick="job-detail-company-info" 区域
+            el = card.query_selector("[data-nick='job-detail-company-info'] .ellipsis-1")
+            job["company"] = el.inner_text().strip() if el else ""
+
+            # 标签: 经验/学历等（job_link 内的小 span）
             tags = []
-            for t in card.query_selector_all(".job-attr, [class*='tag'] span, .labels label"):
+            for t in job_link.query_selector_all("span"):
                 text = t.inner_text().strip()
-                if text:
+                if text and text not in (job["salary"], "急聘", "【", "】") and len(text) < 15:
+                    if "年" in text or "学历" in text or "本科" in text or "硕士" in text or "大专" in text:
+                        tags.append(text)
+            # 公司信息里的标签（行业/规模）
+            for t in card.query_selector_all("[data-nick='job-detail-company-info'] span"):
+                text = t.inner_text().strip()
+                if text and ("人" in text or "融资" in text or "上市" in text) and len(text) < 20:
                     tags.append(text)
             job["tags"] = tags
 
-            # Boss 信息
-            el = card.query_selector(".publisher-name, [class*='recruiter']")
+            # 招聘者
+            el = card.query_selector("[class*='recruiter']")
             job["boss_info"] = el.inner_text().strip() if el else ""
 
             job["online"] = card.query_selector("[class*='online'], .online-icon") is not None

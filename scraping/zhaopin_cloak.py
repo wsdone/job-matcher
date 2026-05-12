@@ -17,7 +17,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(os.path.dirname(BASE_DIR), "data")
 PROFILE_DIR = os.path.join(BASE_DIR, ".cloak_profile_zhaopin")
 COOKIES_FILE = os.path.join(BASE_DIR, "zhaopin_cookies.json")
-FINGERPRINT_SEED = "42071"
+FINGERPRINT_SEED = str(hash(PROFILE_DIR) % 100000)  # 每个 profile 自动生成唯一指纹
 
 ZHAOPIN_URL = "https://sou.zhaopin.com"
 
@@ -71,10 +71,7 @@ def _save_cookies(context):
 def _extract_jobs(page):
     jobs = []
     try:
-        page.wait_for_selector(
-            ".joblist-box__item, .positionlist__item, [class*='job-item'], .soup__list__item",
-            timeout=15000,
-        )
+        page.wait_for_selector(".joblist-box__item", timeout=15000)
     except Exception:
         _save_debug(page, "no_cards")
         return jobs
@@ -84,9 +81,7 @@ def _extract_jobs(page):
         page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
         time.sleep(0.8)
 
-    cards = page.query_selector_all(
-        ".joblist-box__item, .positionlist__item, [class*='job-item'], .soup__list__item"
-    )
+    cards = page.query_selector_all(".joblist-box__item")
     if not cards:
         _save_debug(page, "empty_cards")
         return jobs
@@ -96,54 +91,46 @@ def _extract_jobs(page):
             job = {}
 
             # 标题
-            el = card.query_selector(
-                ".jobinfo__top__title, .positionlist__item__title, a[title], [class*='job-name']"
-            )
+            el = card.query_selector("a.jobinfo__name")
             job["title"] = el.inner_text().strip() if el else ""
-            if not job["title"]:
-                el = card.query_selector("a[href*='/jobs/']")
-                job["title"] = el.inner_text().strip() if el else ""
 
             # 薪资
-            el = card.query_selector(
-                ".jobinfo__salary, [class*='salary'], .iteminfo__money"
-            )
+            el = card.query_selector(".jobinfo__salary")
             job["salary"] = el.inner_text().strip() if el else ""
 
             # 公司
-            el = card.query_selector(
-                ".companyinfo__top__name, [class*='company-name'] a, .companyinfo__top a"
-            )
+            el = card.query_selector("a.companyinfo__name")
             job["company"] = el.inner_text().strip() if el else ""
 
-            # 地点
-            el = card.query_selector(
-                ".jobinfo__other__city, [class*='city'], .iteminfo__area"
-            )
-            job["location"] = el.inner_text().strip() if el else ""
+            # 地点 + 经验 + 学历: .jobinfo__other-info-item
+            location = ""
+            tags = []
+            for item in card.query_selector_all(".jobinfo__other-info-item"):
+                text = item.inner_text().strip()
+                if text:
+                    if not location and ("·" in text or "市" in text):
+                        location = text
+                    else:
+                        tags.append(text)
+            job["location"] = location
+            job["tags"] = tags
 
             # 链接
-            el = card.query_selector("a[href*='/jobs/'], a[href*='zhaopin.com/jobs']")
+            el = card.query_selector("a.jobinfo__name")
             if el:
                 href = el.get_attribute("href") or ""
                 job["link"] = href if href.startswith("http") else href
             else:
                 job["link"] = ""
 
-            # 标签
-            tags = []
-            for t in card.query_selector_all(
-                ".jobinfo__other__info li, [class*='tag'] span, .iteminfo__demand span"
-            ):
+            # 公司标签（规模/行业）
+            for t in card.query_selector_all(".companyinfo__tag .joblist-box__item-tag"):
                 text = t.inner_text().strip()
                 if text:
-                    tags.append(text)
-            job["tags"] = tags
+                    job["tags"].append(text)
 
             # 招聘者
-            el = card.query_selector(
-                ".publisherinfo__top, [class*='recruiter'], .iteminfo__publisher"
-            )
+            el = card.query_selector("[class*='publisher'], [class*='recruiter']")
             job["boss_info"] = el.inner_text().strip() if el else ""
 
             job["online"] = card.query_selector("[class*='online'], .online-icon") is not None
@@ -298,7 +285,16 @@ def run(keyword="Java开发", city="北京", pages=3, fetch_detail=True, debug=F
             ctx.close()
             return []
     elif not _is_logged_in(ctx):
-        print("[*] 未检测到登录态，尝试继续...")
+        print("[!] 未登录，请先登录智联招聘")
+        page.goto("https://passport.zhaopin.com/login", wait_until="domcontentloaded", timeout=30000)
+        if _wait_for_login(ctx, page):
+            time.sleep(2)
+            page.goto(first_url, wait_until="domcontentloaded", timeout=60000)
+            time.sleep(5)
+        else:
+            print("[-] 登录超时，尝试继续无登录爬取...")
+            page.goto(first_url, wait_until="domcontentloaded", timeout=60000)
+            time.sleep(5)
 
     # 逐页爬取
     all_jobs = []
