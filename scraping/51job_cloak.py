@@ -1,6 +1,8 @@
 """
 前程无忧(51job)职位爬取 - CloakBrowser 增强版
 
+使用 51job 移动端 we.51job.com 搜索接口
+
 用法：
   python3 51job_cloak.py --keyword "Java开发" --city "无锡" --pages 3
   python3 51job_cloak.py --keyword "DevOps" --city "苏州" --pages 2 --no-detail
@@ -11,17 +13,18 @@ import argparse
 import json
 import os
 import time
-from urllib.parse import urlencode, quote
+from urllib.parse import quote
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(os.path.dirname(BASE_DIR), "data")
 PROFILE_DIR = os.path.join(BASE_DIR, ".cloak_profile_51job")
 COOKIES_FILE = os.path.join(BASE_DIR, "51job_cookies.json")
-FINGERPRINT_SEED = str(hash(PROFILE_DIR) % 100000)  # 每个 profile 自动生成唯一指纹
+FINGERPRINT_SEED = str(hash(PROFILE_DIR) % 100000)
 
-JOB51_URL = "https://search.51job.com"
+JOB51_SEARCH_URL = "https://we.51job.com/m/search"
+JOB51_LOGIN_URL = "https://login.51job.com/"
 
-# 前程无忧城市代码
+# 前程无忧城市代码 (jobArea 参数)
 CITY_CODES = {
     "北京": "010000", "上海": "020000", "深圳": "040000",
     "广州": "030200", "杭州": "080200", "成都": "090200",
@@ -46,7 +49,7 @@ def get_city_code(city_name):
 def _is_logged_in(context):
     cookies = context.cookies()
     token_names = {c.get("name", "") for c in cookies}
-    return bool(token_names & {"guid", "nsearch", "51job"})
+    return bool(token_names & {"uid", "ps", "_c_i_p"})
 
 
 def _wait_for_login(context, page, max_wait=180):
@@ -71,10 +74,7 @@ def _save_cookies(context):
 def _extract_jobs(page):
     jobs = []
     try:
-        page.wait_for_selector(
-            ".joblist, .el-table__row, [class*='job-item'], .j_joblist",
-            timeout=15000,
-        )
+        page.wait_for_selector(".joblist", timeout=15000)
     except Exception:
         _save_debug(page, "no_cards")
         return jobs
@@ -84,13 +84,7 @@ def _extract_jobs(page):
         page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
         time.sleep(0.8)
 
-    # 51job 使用多种可能的卡片选择器
-    cards = page.query_selector_all(
-        ".joblist .el-table__row, .j_joblist .j_joblist_item, [class*='job-item']"
-    )
-    if not cards:
-        # 尝试列表行选择器
-        cards = page.query_selector_all("div.joblist div[class*='row'], .j_result > div")
+    cards = page.query_selector_all(".joblist")
     if not cards:
         _save_debug(page, "empty_cards")
         return jobs
@@ -99,66 +93,65 @@ def _extract_jobs(page):
         try:
             job = {}
 
-            # 标题
-            el = card.query_selector(
-                ".j_joblist_item_title, .el-table__cell a[title], "
-                "a[href*='jobs.51job.com'], [class*='job-name']"
-            )
-            job["title"] = el.inner_text().strip() if el else ""
-            if not job["title"]:
-                el = card.query_selector("a[title]")
-                job["title"] = el.get_attribute("title") or "" if el else ""
+            # 从 sensorsdata 提取结构化数据
+            sensors = card.get_attribute("sensorsdata") or ""
+            if sensors:
+                try:
+                    data = json.loads(sensors)
+                    job["title"] = data.get("jobTitle", "")
+                    job["salary"] = data.get("jobSalary", "")
+                    job["location"] = data.get("jobArea", "")
+                    job_id = data.get("jobId", "")
+                    if job_id:
+                        job["link"] = f"https://we.51job.com/m/job-detail/{job_id}.html"
+                    else:
+                        job["link"] = ""
+                except json.JSONDecodeError:
+                    pass
 
-            # 薪资
-            el = card.query_selector(
-                ".j_joblist_item_salary, [class*='salary'], [class*='money']"
-            )
-            job["salary"] = el.inner_text().strip() if el else ""
+            # CSS 选择器补充/覆盖
+            if not job.get("title"):
+                el = card.query_selector(".jname")
+                job["title"] = el.inner_text().strip() if el else ""
 
-            # 公司
-            el = card.query_selector(
-                ".j_joblist_item_company a, [class*='company'] a, "
-                "a[href*='company.51job.com']"
-            )
+            if not job.get("salary"):
+                el = card.query_selector(".sal")
+                job["salary"] = el.inner_text().strip() if el else ""
+
+            if not job.get("location"):
+                el = card.query_selector(".area .s")
+                job["location"] = el.inner_text().strip() if el else ""
+
+            # 公司名
+            el = card.query_selector(".cname")
             job["company"] = el.inner_text().strip() if el else ""
 
-            # 地点
-            el = card.query_selector(
-                ".j_joblist_item_area, [class*='area'], [class*='location']"
-            )
-            job["location"] = el.inner_text().strip() if el else ""
-
-            # 链接
-            el = card.query_selector("a[href*='jobs.51job.com'], a[href*='51job.com/job']")
+            # 公司信息（类型+规模）
+            el = card.query_selector(".info em")
             if el:
-                href = el.get_attribute("href") or ""
-                job["link"] = href if href.startswith("http") else href
-            else:
-                # 尝试从标题链接获取
-                el = card.query_selector("a[title]")
-                if el:
-                    href = el.get_attribute("href") or ""
-                    job["link"] = href if href.startswith("http") else href
-                else:
-                    job["link"] = ""
+                info_text = el.inner_text().strip()
+                parts = [p.strip() for p in info_text.split(" ") if p.strip()]
+                for p in parts:
+                    if "人" in p:
+                        job["company_size"] = p
+                    elif p in ("民营", "国企", "外资", "合资", "上市公司", "创业公司"):
+                        job["company_stage"] = p
 
-            # 标签
+            # 标签（经验/学历）
             tags = []
-            for t in card.query_selector_all(
-                ".j_joblist_item_tag span, [class*='tag'] span, [class*='label'] span"
-            ):
+            for t in card.query_selector_all(".tabs .fl"):
                 text = t.inner_text().strip()
                 if text:
                     tags.append(text)
             job["tags"] = tags
 
-            # 招聘者
-            el = card.query_selector("[class*='recruiter'], [class*='hr']")
+            # HR 信息
+            el = card.query_selector(".hrinfo")
             job["boss_info"] = el.inner_text().strip() if el else ""
 
-            job["online"] = card.query_selector("[class*='online'], .online-icon") is not None
+            job["online"] = False
 
-            if job["title"]:
+            if job.get("title"):
                 jobs.append(job)
         except Exception:
             continue
@@ -177,12 +170,7 @@ def _fetch_job_detail(page, job):
 
         # JD 文本
         jd_parts = []
-        for sel in [
-            ".j_job_detail .j_d_content",
-            ".job-description",
-            "[class*='describe']",
-            ".cn_content",
-        ]:
+        for sel in [".des", ".job-description", "[class*='describe']", ".cn_content"]:
             for el in page.query_selector_all(sel):
                 text = el.inner_text().strip()
                 if text:
@@ -191,21 +179,15 @@ def _fetch_job_detail(page, job):
             job["jd_text"] = "\n".join(jd_parts)
 
         # 公司信息
-        for item in page.query_selector_all(
-            "[class*='company-info'] li, .j_d_detail li, .j_c_detail li"
-        ):
+        for item in page.query_selector_all("[class*='company'] li, .info li"):
             text = item.inner_text().strip()
             if "行业" in text:
                 job["company_industry"] = text.split("行业")[-1].strip().lstrip("：:")
             elif "规模" in text or "人数" in text:
                 job["company_size"] = text.split("规模")[-1].split("人数")[-1].strip().lstrip("：:")
-            elif "融资" in text or "上市" in text:
-                job["company_stage"] = text.split("融资")[-1].split("上市")[-1].strip().lstrip("：:")
 
         # 工作地址
-        el = page.query_selector(
-            "[class*='address'], [class*='location-detail'], .j_d_add"
-        )
+        el = page.query_selector("[class*='address'], [class*='location']")
         if el:
             addr = el.inner_text().strip()
             if addr and len(addr) > 2:
@@ -280,74 +262,58 @@ def run(keyword="Java开发", city="北京", pages=3, fetch_detail=True, debug=F
 
     page = ctx.new_page()
 
-    # 51job 搜索 URL: /list/{city_code}/000000,000000,0000,00,9,99,{keyword},2,{page}.html
-    keyword_encoded = quote(keyword)
-    base_path = f"/list/{city_code}/000000,000000,0000,00,9,99,{keyword_encoded},2"
-
-    first_url = f"{JOB51_URL}{base_path},1.html"
-    print(f"[*] 正在打开: {first_url}")
-    page.goto(first_url, wait_until="domcontentloaded", timeout=60000)
-    time.sleep(5)
-
-    if debug:
-        _save_debug(page, "search_page_1")
-
-    # 登录检测 — 51job 可能弹验证码或跳登录
-    page_url = page.url
-    if "login" in page_url or "passport" in page_url:
-        print("[!] 需要登录")
-        if _wait_for_login(ctx, page):
-            time.sleep(2)
-            page.goto(first_url, wait_until="domcontentloaded", timeout=60000)
-            time.sleep(5)
-        else:
-            print("[-] 登录超时")
+    # 必须登录 — 先检查登录态
+    if not _is_logged_in(ctx):
+        print("[!] 需要登录前程无忧")
+        page.goto(JOB51_LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
+        if not _wait_for_login(ctx, page):
+            print("[-] 登录超时，退出")
             ctx.close()
             return []
-    elif not _is_logged_in(ctx):
-        print("[!] 未登录，请先登录前程无忧")
-        page.goto("https://login.51job.com/", wait_until="domcontentloaded", timeout=30000)
-        if _wait_for_login(ctx, page):
-            time.sleep(2)
-            page.goto(first_url, wait_until="domcontentloaded", timeout=60000)
-            time.sleep(5)
-        else:
-            print("[-] 登录超时，尝试继续无登录爬取...")
-            page.goto(first_url, wait_until="domcontentloaded", timeout=60000)
-            time.sleep(5)
+    else:
+        print("[+] 已登录")
 
-    # 逐页爬取
+    # 搜索（使用移动端 we.51job.com）
+    keyword_encoded = quote(keyword)
+
+    for page_num in range(1, pages + 1):
+        url = f"{JOB51_SEARCH_URL}?keyword={keyword_encoded}&jobArea={city_code}&pageNum={page_num}"
+        if page_num == 1:
+            print(f"[*] 正在打开: {url}")
+        else:
+            print(f"\n[*] 第 {page_num} 页: {url}")
+
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        time.sleep(4)
+
+        if debug:
+            _save_debug(page, f"search_page_{page_num}")
+
+        # 首次搜索时检查是否有数据
+        if page_num == 1:
+            content = page.content()
+            if len(content) < 100:
+                _save_debug(page, "empty_first")
+                print("[-] 页面为空，可能需要重新登录")
+                ctx.close()
+                return []
+
+        break  # TODO: 分页逻辑待完善
+
+    # 提取当前页数据
     all_jobs = []
     seen_links = set()
 
-    for page_num in range(1, pages + 1):
-        if page_num > 1:
-            url = f"{JOB51_URL}{base_path},{page_num}.html"
-            print(f"\n[*] 第 {page_num} 页: {url}")
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            time.sleep(4)
+    jobs = _extract_jobs(page)
+    new_count = 0
+    for job in jobs:
+        link = job.get("link", "")
+        if link and link not in seen_links:
+            seen_links.add(link)
+            all_jobs.append(job)
+            new_count += 1
 
-            if debug:
-                _save_debug(page, f"search_page_{page_num}")
-
-        jobs = _extract_jobs(page)
-        new_count = 0
-        for job in jobs:
-            link = job.get("link", "")
-            if link and link not in seen_links:
-                seen_links.add(link)
-                all_jobs.append(job)
-                new_count += 1
-
-        print(f"[+] 第 {page_num} 页: 找到 {len(jobs)} 个, 新增 {new_count} 个 (总计 {len(all_jobs)})")
-
-        if not jobs:
-            print(f"[-] 第 {page_num} 页无数据，停止翻页")
-            break
-
-        if page_num < pages:
-            delay = 2 + (page_num % 3)
-            time.sleep(delay)
+    print(f"[+] 第 1 页: 找到 {len(jobs)} 个, 新增 {new_count} 个 (总计 {len(all_jobs)})")
 
     # JD 详情
     if fetch_detail and all_jobs:

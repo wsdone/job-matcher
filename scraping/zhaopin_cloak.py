@@ -46,7 +46,7 @@ def get_city_code(city_name):
 def _is_logged_in(context):
     cookies = context.cookies()
     token_names = {c.get("name", "") for c in cookies}
-    return bool(token_names & {"sensorsdata2015jssdkchannel", "x-zp-client-id", "token"})
+    return bool(token_names & {"token", "userInfo", "x-zp-client-id"})
 
 
 def _wait_for_login(context, page, max_wait=180):
@@ -266,7 +266,7 @@ def run(keyword="Java开发", city="北京", pages=3, fetch_detail=True, debug=F
     if debug:
         _save_debug(page, "search_page_1")
 
-    # 登录检测
+    # 登录检测（智联招聘必须登录才能准确搜索）
     page_url = page.url
     if "login" in page_url or "passport" in page_url or "register" in page_url:
         print("[!] 需要登录")
@@ -275,20 +275,19 @@ def run(keyword="Java开发", city="北京", pages=3, fetch_detail=True, debug=F
             page.goto(first_url, wait_until="domcontentloaded", timeout=60000)
             time.sleep(5)
         else:
-            print("[-] 登录超时")
+            print("[-] 登录超时，退出")
             ctx.close()
             return []
     elif not _is_logged_in(ctx):
-        print("[!] 未登录，请先登录智联招聘")
+        print("[!] 需要登录智联招聘")
         page.goto("https://passport.zhaopin.com/login", wait_until="domcontentloaded", timeout=30000)
-        if _wait_for_login(ctx, page):
-            time.sleep(2)
-            page.goto(first_url, wait_until="domcontentloaded", timeout=60000)
-            time.sleep(5)
-        else:
-            print("[-] 登录超时，尝试继续无登录爬取...")
-            page.goto(first_url, wait_until="domcontentloaded", timeout=60000)
-            time.sleep(5)
+        if not _wait_for_login(ctx, page):
+            print("[-] 登录超时，退出")
+            ctx.close()
+            return []
+        time.sleep(2)
+        page.goto(first_url, wait_until="domcontentloaded", timeout=60000)
+        time.sleep(5)
 
     # 逐页爬取
     all_jobs = []

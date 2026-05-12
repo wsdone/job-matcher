@@ -284,11 +284,19 @@ def run(keyword="Java开发", city="北京", pages=3, fetch_detail=True, debug=F
             page.goto(first_url, wait_until="domcontentloaded", timeout=60000)
             time.sleep(5)
         else:
-            print("[-] 登录超时")
+            print("[-] 登录超时，退出")
             ctx.close()
             return []
     elif not _is_logged_in(ctx):
-        print("[*] 未检测到登录态，尝试继续...")
+        print("[!] 需要登录猎聘")
+        page.goto("https://www.liepin.com/login/", wait_until="domcontentloaded", timeout=30000)
+        if not _wait_for_login(ctx, page):
+            print("[-] 登录超时，退出")
+            ctx.close()
+            return []
+        time.sleep(2)
+        page.goto(first_url, wait_until="domcontentloaded", timeout=60000)
+        time.sleep(5)
 
     # 逐页爬取
     all_jobs = []
