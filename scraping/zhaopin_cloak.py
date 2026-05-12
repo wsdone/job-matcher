@@ -21,20 +21,20 @@ FINGERPRINT_SEED = str(hash(PROFILE_DIR) % 100000)  # 每个 profile 自动生�
 
 ZHAOPIN_URL = "https://sou.zhaopin.com"
 
-# 智联招聘城市代码
+# 智联招聘城市代码 (jl 参数)
 CITY_CODES = {
     "北京": "530", "上海": "538", "深圳": "765",
     "广州": "763", "杭州": "653", "成都": "801",
     "南京": "635", "武汉": "736", "西安": "854",
-    "重庆": "854", "苏州": "636", "天津": "531",
+    "重庆": "854", "苏州": "639", "天津": "531",
     "长沙": "749", "郑州": "719", "东莞": "768",
     "沈阳": "565", "青岛": "609", "合肥": "608",
-    "佛山": "767", "无锡": "637",
-    "厦门": "681", "福州": "682", "大连": "588",
+    "佛山": "767", "无锡": "636",
+    "厦门": "682", "福州": "681", "大连": "588",
     "哈尔滨": "582", "长春": "592", "石家庄": "548",
     "济南": "613", "昆明": "782", "贵阳": "781",
     "南昌": "693", "南宁": "768", "太原": "562",
-    "常州": "638", "南通": "639", "宁波": "680",
+    "常州": "638", "南通": "640", "宁波": "681",
     "温州": "679", "珠海": "769", "烟台": "610",
 }
 
@@ -241,12 +241,6 @@ def run(keyword="Java开发", city="北京", pages=3, fetch_detail=True, debug=F
 
     city_code = get_city_code(city)
 
-    params = {
-        "keyword": keyword,
-        "cityId": city_code,
-        "pageSize": 30,
-    }
-
     print(f"\n{'='*60}")
     print(f"  智联招聘: {keyword} @ {city}")
     print(f"  目标: {pages} 页")
@@ -263,8 +257,8 @@ def run(keyword="Java开发", city="北京", pages=3, fetch_detail=True, debug=F
 
     page = ctx.new_page()
 
-    # 第一页
-    first_url = f"{ZHAOPIN_URL}/?{urlencode(params)}"
+    # 第一页 — 使用正确的 URL 格式: sou.zhaopin.com/?jl={code}&kw={keyword}
+    first_url = f"{ZHAOPIN_URL}/?jl={city_code}&kw={quote(keyword)}"
     print(f"[*] 正在打开: {first_url}")
     page.goto(first_url, wait_until="domcontentloaded", timeout=60000)
     time.sleep(5)
@@ -302,8 +296,7 @@ def run(keyword="Java开发", city="北京", pages=3, fetch_detail=True, debug=F
 
     for page_num in range(1, pages + 1):
         if page_num > 1:
-            params["p"] = page_num
-            url = f"{ZHAOPIN_URL}/?{urlencode(params)}"
+            url = f"{ZHAOPIN_URL}/?jl={city_code}&kw={quote(keyword)}&p={page_num}"
             print(f"\n[*] 第 {page_num} 页: {url}")
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
             time.sleep(4)

@@ -29,7 +29,7 @@ description: "智能职位匹配助手 - AI 驱动的简历分析、职位爬取
 |------|------|------|---------|
 | Boss直聘 | `scraping/boss_cloak.py` | 已验证可用 | 是（扫码） |
 | 猎聘 | `scraping/liepin_cloak.py` | 已验证可用 | 否（登录后更完整） |
-| 智联招聘 | `scraping/zhaopin_cloak.py` | 实验性 | 待验证 |
+| 智联招聘 | `scraping/zhaopin_cloak.py` | 已验证可用 | 是（需登录后搜索才准确） |
 | 前程无忧 | `scraping/51job_cloak.py` | 暂不可用 | - |
 
 ```bash
