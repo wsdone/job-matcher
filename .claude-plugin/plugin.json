@@ -1,0 +1,11 @@
+{
+  "name": "job-matcher",
+  "description": "AI-driven job matching assistant - resume analysis, multi-platform job scraping, intelligent scoring and recommendations",
+  "version": "1.0.0",
+  "author": {
+    "name": "wsdone"
+  },
+  "license": "AGPL-3.0",
+  "keywords": ["job", "matching", "resume", "scraping", "scoring", "boss-zhipin"],
+  "skills": ["./"]
+}

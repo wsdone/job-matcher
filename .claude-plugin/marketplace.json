@@ -1,0 +1,31 @@
+{
+  "name": "job-matcher",
+  "id": "job-matcher",
+  "owner": {
+    "name": "wsdone"
+  },
+  "metadata": {
+    "description": "AI-driven job matching assistant - resume analysis, multi-platform job scraping, multi-dimensional scoring",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "job-matcher",
+      "source": "./",
+      "description": "智能职位匹配助手 - AI 驱动的简历分析、职位爬取、多维度评分",
+      "version": "1.0.0",
+      "author": {
+        "name": "wsdone"
+      },
+      "keywords": [
+        "job",
+        "matching",
+        "resume",
+        "scraping",
+        "boss-zhipin",
+        "scoring"
+      ],
+      "category": "workflow"
+    }
+  ]
+}

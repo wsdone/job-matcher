@@ -8,16 +8,29 @@
 
 ## 安装
 
+### 方式一：Claude Code 插件安装（推荐）
+
+```bash
+# 添加到 marketplace
+/plugin marketplace add wsdone/job-matcher
+
+# 安装插件
+/plugin install job-matcher
+```
+
+### 方式二：手动安装
+
 ```bash
 # 克隆到你的项目目录
 git clone https://github.com/wsdone/job-matcher.git
 cd job-matcher
-
-# 安装 Python 依赖
-pip install cloakbrowser openpyxl
 ```
 
-然后在 Claude Code 中引用本技能即可。确保 `SKILL.md` 在项目根目录。
+### 安装依赖
+
+```bash
+pip install cloakbrowser openpyxl
+```
 
 ## 工作流程
 
