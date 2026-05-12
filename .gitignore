@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Browser session data (contains login credentials)
+scraping/.cloak_profile/
+scraping/boss_cookies.json
+
+# Scraped data & reports (generated per session)
+data/
+reports/
+
+# User config (contains personal info)
+config/profile.yaml
+
+# Playwright
+playwright/auth*.json
+test-results/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# OMC
+.omc/
