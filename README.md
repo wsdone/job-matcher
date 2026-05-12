@@ -1,6 +1,25 @@
-# Job Matcher - 智能职位匹配助手
+# Job Matcher - Claude Code 智能职位匹配技能
 
-AI 驱动的职位匹配工具：读取简历 → 爬取招聘平台 → 多维度评分 → 输出 Excel 报告。
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
+
+一个 Claude Code 技能（Skill），让 AI 帮你自动读取简历、爬取招聘平台、智能评分、生成推荐报告。
+
+输入 `/job-matcher` 即可开始。
+
+## 安装
+
+```bash
+# 克隆到你的项目目录
+git clone https://github.com/wsdone/job-matcher.git
+cd job-matcher
+
+# 安装 Python 依赖
+pip install cloakbrowser openpyxl
+```
+
+然后在 Claude Code 中引用本技能即可。确保 `SKILL.md` 在项目根目录。
+
+## 工作流程
 
 ## 平台支持状态
 
@@ -98,4 +117,4 @@ Boss API 返回的 GPS 坐标可直接用于通勤计算，省去地理编码步
 
 ## 许可证
 
-MIT License
+[AGPL-3.0](LICENSE) — 使用、修改、分发均需开源，网络服务使用也需公开源码。
