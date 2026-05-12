@@ -6,8 +6,8 @@ __pycache__/
 *.pyc
 
 # Browser session data (contains login credentials)
-scraping/.cloak_profile/
-scraping/boss_cookies.json
+scraping/.cloak_profile*/
+scraping/*_cookies.json
 
 # Scraped data & reports (generated per session)
 data/

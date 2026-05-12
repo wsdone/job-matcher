@@ -23,10 +23,21 @@ description: "智能职位匹配助手 - AI 驱动的简历分析、职位爬取
 
 ### Phase 3: 爬取职位
 
-使用 `scraping/boss_cloak.py` 爬取 Boss直聘。
+支持三个平台的爬取脚本（均基于 CloakBrowser 反检测）：
+
+| 平台 | 脚本 | 用法 |
+|------|------|------|
+| Boss直聘 | `scraping/boss_cloak.py` | `--keyword --city --pages --salary --experience --degree` |
+| 猎聘 | `scraping/liepin_cloak.py` | `--keyword --city --pages --debug` |
+| 智联招聘 | `scraping/zhaopin_cloak.py` | `--keyword --city --pages --debug` |
+| 前程无忧 | `scraping/51job_cloak.py` | `--keyword --city --pages --debug` |
 
 ```bash
+# 示例：先只抓列表（--no-detail），后续对精选岗位抓详情
 python3 scraping/boss_cloak.py --keyword "关键词" --city "城市" --pages 3 --no-detail
+python3 scraping/liepin_cloak.py --keyword "关键词" --city "城市" --pages 3 --no-detail
+python3 scraping/zhaopin_cloak.py --keyword "关键词" --city "城市" --pages 3 --no-detail
+python3 scraping/51job_cloak.py --keyword "关键词" --city "城市" --pages 3 --no-detail
 ```
 
 - AI 根据简历自主确定多个搜索关键词，逐个搜索
@@ -103,7 +114,10 @@ job-matcher/
 ├── config/
 │   └── profile.yaml.example    # 配置模板
 ├── scraping/
-│   └── boss_cloak.py           # 爬虫工具（CloakBrowser）
+│   ├── boss_cloak.py           # Boss直聘爬虫（CloakBrowser）
+│   ├── liepin_cloak.py         # 猎聘爬虫（CloakBrowser）
+│   ├── zhaopin_cloak.py        # 智联招聘爬虫（CloakBrowser）
+│   └── 51job_cloak.py          # 前程无忧爬虫（CloakBrowser）
 ├── scripts/
 │   ├── scoring.py              # 评分 & Excel 工具
 │   └── commute.py              # 通勤计算（腾讯地图API）
