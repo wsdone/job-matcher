@@ -36,6 +36,22 @@ CITY_CODES = {
     "南昌": "city-nc", "南宁": "city-nn", "太原": "city-ty",
     "常州": "city-cz", "南通": "city-nt", "宁波": "city-nb",
     "温州": "city-wz", "珠海": "city-zh", "烟台": "city-yt",
+    "泉州": "city-qz", "惠州": "city-hz2", "中山": "city-zs",
+    "威海": "city-wh2", "徐州": "city-xz", "扬州": "city-yz",
+    "镇江": "city-zj", "盐城": "city-yc", "泰州": "city-tz2",
+    "嘉兴": "city-jx", "绍兴": "city-sx", "金华": "city-jh",
+    "台州": "city-tz3", "湖州": "city-huz", "芜湖": "city-wh3",
+    "洛阳": "city-ly", "保定": "city-bd", "廊坊": "city-lf",
+    "唐山": "city-ts", "赣州": "city-gz2", "桂林": "city-gl",
+    "潍坊": "city-wf", "临沂": "city-ly2", "淄博": "city-zb",
+    "襄阳": "city-xy", "宜昌": "city-yc2", "珠海": "city-zh2",
+    "江门": "city-jm", "湛江": "city-zj2", "株洲": "city-zz2",
+    "衡阳": "city-hy", "岳阳": "city-yy", "绵阳": "city-my",
+    "遵义": "city-zy", "曲靖": "city-qj", "柳州": "city-lz",
+    "宝鸡": "city-bj2", "咸阳": "city-xy2", "兰州": "city-lz2",
+    "银川": "city-yc3", "西宁": "city-xn", "海口": "city-hk",
+    "三亚": "city-sy2", "呼和浩特": "city-hhht", "乌鲁木齐": "city-wlmq",
+    "拉萨": "city-ls",
 }
 
 

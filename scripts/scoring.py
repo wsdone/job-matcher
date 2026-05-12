@@ -361,7 +361,9 @@ def main():
     parser.add_argument("--work-years", type=int, default=0, help="工作年限")
     parser.add_argument("--exclude", default="", help="排除关键词（逗号分隔）")
     parser.add_argument("--home-address", default="", help="住址（用于通勤计算）")
-    parser.add_argument("--map-key", default="", help="腾讯地图 API Key")
+    parser.add_argument("--map-key", default="", help="地图 API Key（腾讯或高德）")
+    parser.add_argument("--map-provider", default="tencent", choices=["tencent", "amap"],
+                        help="地图服务商: tencent 或 amap")
     parser.add_argument("--max-commute", type=int, default=60, help="最大可接受通勤时间（分钟）")
     parser.add_argument("--commute-mode", default="driving", choices=["driving", "transit"],
                         help="通勤方式: driving 或 transit")
@@ -388,10 +390,10 @@ def main():
 
     commute_enabled = args.home_address and args.map_key and _HAS_COMMUTE
     if commute_enabled:
-        _commute_configure(args.map_key)
-        print(f"  通勤计算: 已启用 (住址: {args.home_address}, 模式: {args.commute_mode})")
+        _commute_configure(args.map_key, provider=args.map_provider)
+        print(f"  通勤计算: 已启用 ({args.map_provider}, 住址: {args.home_address}, 模式: {args.commute_mode})")
     elif args.home_address and not args.map_key:
-        print("  通勤计算: 跳过（未提供 --map-key）")
+        print("  通勤计算: 跳过（未提供 --map-key，不影响其他评分）")
     elif args.home_address and not _HAS_COMMUTE:
         print("  通勤计算: 跳过（commute.py 未找到）")
 
