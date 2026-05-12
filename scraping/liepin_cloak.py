@@ -46,7 +46,7 @@ def get_city_code(city_name):
 def _is_logged_in(context):
     cookies = context.cookies()
     token_names = {c.get("name", "") for c in cookies}
-    return bool(token_names & {"ltoken", "liepin_token", "user_track"})
+    return bool(token_names & {"lt_auth", "inited_user", "user_photo"})
 
 
 def _wait_for_login(context, page, max_wait=180):
