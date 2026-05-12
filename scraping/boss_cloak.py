@@ -1,27 +1,16 @@
 """
 Boss直聘职位爬取 - CloakBrowser 增强版
 
-支持：翻页、多条件筛选、去重、JD详情抓取
+数据获取策略：
+  列表数据 → Boss 内部 API (/wapi/zpgeek/search/joblist.json)
+    明文薪资、公司名/规模/行业/融资、学历要求、技能要求、GPS坐标
+  详情数据 → HTML 抓取
+    JD 全文、工作地址
 
 用法：
-  # 基础搜索（默认3页，自动抓取详情）
   python3 boss_cloak.py --keyword "Java开发" --city "北京"
-
-  # 只抓列表，不抓详情
   python3 boss_cloak.py --keyword "Java开发" --city "北京" --no-detail
-
-  # 筛选薪资（40-50K）
-  python3 boss_cloak.py --keyword "Java开发" --city "北京" --salary 405
-
-  # 组合筛选 + 5页
   python3 boss_cloak.py --keyword "Java开发" --city "北京" --salary 405 --experience 105 --degree 206 --pages 5
-
-筛选代码参考：
-  薪资:   405=40-50K  505=50K+  306=30-40K  205=20-30K  104=10-20K
-  经验:   101=应届  102=1年以内  104=1-3年  105=3-5年  106=5-10年  107=10年以上
-  学历:   206=本科  207=硕士  208=博士  209=大专  210=中专/中技
-  公司规模: 301=0-20人  302=20-99人  303=100-499人  304=500-999人  305=1000-9999人  306=10000人以上
-  融资阶段: 801=未融资  802=天使轮  803=A轮  804=B轮  805=C轮  806=D轮及以上  807=已上市  808=不需要融资
 """
 
 import argparse
@@ -34,7 +23,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(os.path.dirname(BASE_DIR), "data")
 PROFILE_DIR = os.path.join(BASE_DIR, ".cloak_profile")
 COOKIES_FILE = os.path.join(BASE_DIR, "boss_cookies.json")
-FINGERPRINT_SEED = str(hash(PROFILE_DIR) % 100000)  # 每个 profile 自动生成唯一指纹
+FINGERPRINT_SEED = str(hash(PROFILE_DIR) % 100000)
 
 BOSS_URL = "https://www.zhipin.com"
 
@@ -67,7 +56,6 @@ CITY_CODES = {
     "曲靖": "101290400", "柳州": "101300300", "宝鸡": "101110300",
     "咸阳": "101110200", "银川": "101170100", "西宁": "101150100",
     "呼和浩特": "101080100", "乌鲁木齐": "101130100", "拉萨": "101140100",
-    "南通": "101190500", "常州": "101191100",
 }
 
 
@@ -96,20 +84,66 @@ def _wait_for_login(context, page, max_wait=180):
     return False
 
 
-def _extract_jobs(page):
+def _fetch_list_via_api(page, keyword, city_code, page_num, filters=None):
+    """通过 Boss 内部 API 获取职位列表（明文薪资、完整公司信息、技能要求）"""
+    params = {
+        "scene": 1,
+        "query": keyword,
+        "city": city_code,
+        "page": page_num,
+        "pageSize": 30,
+    }
+    if filters:
+        params.update(filters)
+
+    qs = urlencode(params)
+    api_url = f"/wapi/zpgeek/search/joblist.json?{qs}"
+
+    result = page.evaluate(
+        """async (apiUrl) => {
+        try {
+            const resp = await fetch(apiUrl, {credentials: 'include'});
+            const data = await resp.json();
+            if (data && data.zpData && data.zpData.jobList) {
+                return data.zpData.jobList.map(j => ({
+                    title: j.jobName || '',
+                    salary: j.salaryDesc || '',
+                    company: j.brandName || '',
+                    company_size: j.brandScaleName || '',
+                    company_industry: j.brandIndustry || '',
+                    company_stage: j.brandStageName || '',
+                    location: [j.cityName, j.areaDistrict, j.businessDistrict].filter(Boolean).join('·'),
+                    link: j.encryptJobId ? `https://www.zhipin.com/job_detail/${j.encryptJobId}.html` : '',
+                    company_link: j.encryptBrandId ? `https://www.zhipin.com/gongsi/${j.encryptBrandId}.html` : '',
+                    tags: j.jobLabels || [],
+                    skills: j.skills || [],
+                    job_degree: j.jobDegree || '',
+                    job_experience: j.jobExperience || '',
+                    online: j.bossOnline === true,
+                    boss_name: j.bossName || '',
+                    boss_title: j.bossTitle || '',
+                    work_address: j.businessDistrict || '',
+                    welfare: j.welfareList || [],
+                    gps: j.gps || null,
+                }));
+            }
+            return [];
+        } catch(e) { return []; }
+    }""",
+        api_url,
+    )
+    return result or []
+
+
+def _extract_jobs_fallback(page):
+    """HTML 列表抓取（API 失败时的 fallback）"""
     jobs = []
     try:
         page.wait_for_selector(".job-card-wrap", timeout=10000)
     except Exception:
-        content = page.content()
-        os.makedirs(DATA_DIR, exist_ok=True)
-        with open(os.path.join(DATA_DIR, "debug_page.html"), "w", encoding="utf-8") as f:
-            f.write(content)
-        print(f"[-] 未找到职位卡片，页面已保存到 {DATA_DIR}/debug_page.html")
         return jobs
 
     time.sleep(1)
-    # 滚动加载
     for _ in range(3):
         page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
         time.sleep(0.8)
@@ -127,14 +161,6 @@ def _extract_jobs(page):
             el = card.query_selector(".company-location")
             job["location"] = el.inner_text().strip() if el else ""
 
-            # 公司名（卡片右侧公司区域）
-            company_el = card.query_selector(".company-name a")
-            job["company"] = company_el.inner_text().strip() if company_el else ""
-
-            # Boss 信息（姓名/职位）
-            el = card.query_selector(".boss-name")
-            job["boss_info"] = el.inner_text().strip() if el else ""
-
             el = card.query_selector("a[href*='job_detail']")
             if el:
                 href = el.get_attribute("href") or ""
@@ -148,13 +174,17 @@ def _extract_jobs(page):
             el = card.query_selector(".boss-online-icon")
             job["online"] = el is not None
 
-            # Boss头像链接可能是公司页面
+            el = card.query_selector(".boss-name")
+            job["boss_name"] = el.inner_text().strip() if el else ""
+
             company_el = card.query_selector("a[href*='/gongsi/']")
             if company_el:
                 company_href = company_el.get_attribute("href") or ""
                 job["company_link"] = company_href if company_href.startswith("http") else f"{BOSS_URL}{company_href}"
+                job["company"] = company_el.inner_text().strip()
             else:
                 job["company_link"] = ""
+                job["company"] = ""
 
             if job["title"]:
                 jobs.append(job)
@@ -164,7 +194,7 @@ def _extract_jobs(page):
 
 
 def _fetch_job_detail(page, job):
-    """访问职位详情页，提取完整 JD 文本、公司信息和公司地址"""
+    """访问详情页，提取 JD 全文和工作地址（公司信息已由 API 提供）"""
     link = job.get("link", "")
     if not link:
         return job
@@ -173,7 +203,7 @@ def _fetch_job_detail(page, job):
         page.goto(link, wait_until="domcontentloaded", timeout=30000)
         time.sleep(2)
 
-        # 提取 JD 文本
+        # JD 全文
         jd_parts = []
         for selector in [".job-sec-text", ".job-detail-section", ".job-desc"]:
             els = page.query_selector_all(selector)
@@ -184,30 +214,10 @@ def _fetch_job_detail(page, job):
         if jd_parts:
             job["jd_text"] = "\n".join(jd_parts)
 
-        # 提取公司详情
-        company_info = {}
-        for item in page.query_selector_all(".job-company-info li, .company-info li"):
-            text = item.inner_text().strip()
-            if "行业" in text:
-                company_info["industry"] = text.split("行业")[-1].strip().lstrip("：:")
-            elif "规模" in text or "人数" in text:
-                company_info["size"] = text.split("规模")[-1].split("人数")[-1].strip().lstrip("：:")
-            elif "融资" in text:
-                company_info["stage"] = text.split("融资")[-1].strip().lstrip("：:")
-
-        if company_info.get("industry"):
-            job["company_industry"] = company_info["industry"]
-        if company_info.get("size"):
-            job["company_size"] = company_info["size"]
-        if company_info.get("stage"):
-            job["company_stage"] = company_info["stage"]
-
-        # 提取详情页中的工作地址
+        # 工作地址（优先级高于 API 的 businessDistrict）
         el = page.query_selector(".job-location")
         if el:
-            addr = el.inner_text().strip()
-            # 清理多余文本（"点击查看地图" 等）
-            addr = addr.replace("点击查看地图", "").strip()
+            addr = el.inner_text().strip().replace("点击查看地图", "").strip()
             if addr and len(addr) > 2:
                 job["work_address"] = addr
 
@@ -218,12 +228,12 @@ def _fetch_job_detail(page, job):
 
 
 def _enrich_with_details(ctx, all_jobs):
-    """逐个访问详情页，丰富职位数据"""
+    """逐个访问详情页，抓取 JD 文本和工作地址"""
     page = ctx.new_page()
     total = len(all_jobs)
 
     print(f"\n{'='*60}")
-    print(f"  开始抓取 JD 详情: 共 {total} 个职位")
+    print(f"  抓取 JD 详情: 共 {total} 个职位")
     print(f"{'='*60}")
 
     for i, job in enumerate(all_jobs):
@@ -234,7 +244,6 @@ def _enrich_with_details(ctx, all_jobs):
         print(f"  [{i+1}/{total}] {job.get('title', '')} - {job.get('company', '')}")
         _fetch_job_detail(page, job)
 
-        # 延迟避免触发限制
         delay = 3 + (i % 3)
         time.sleep(delay)
 
@@ -254,11 +263,14 @@ def _save_and_show(all_jobs, keyword, city):
     print(f"{'='*70}")
     for i, job in enumerate(all_jobs[:25], 1):
         tags = " | ".join(job.get("tags", []))
+        skills = ", ".join(job.get("skills", [])[:3])
         online = "🟢" if job.get("online") else ""
         print(f"  {i:3d}. {online} {job['title']}")
-        print(f"       {job['salary']}  {job['company']}  {job['location']}")
+        print(f"       {job['salary']}  {job.get('company', '')}  {job.get('location', '')}")
         if tags:
             print(f"       {tags}")
+        if skills:
+            print(f"       技能: {skills}")
     if len(all_jobs) > 25:
         print(f"  ... 还有 {len(all_jobs) - 25} 个")
     print(f"{'='*70}")
@@ -271,18 +283,18 @@ def run(keyword="Java开发", city="北京", pages=3, salary="", experience="",
 
     city_code = get_city_code(city)
 
-    # 构建基础搜索参数
-    params = {"query": keyword, "city": city_code}
+    # API 筛选参数
+    api_filters = {}
     if salary:
-        params["salary"] = salary
+        api_filters["salary"] = salary
     if experience:
-        params["experience"] = experience
+        api_filters["experience"] = experience
     if degree:
-        params["degree"] = degree
+        api_filters["degree"] = degree
     if scale:
-        params["scale"] = scale
+        api_filters["scale"] = scale
     if stage:
-        params["stage"] = stage
+        api_filters["stage"] = stage
 
     print(f"\n{'='*60}")
     print(f"  Boss直聘: {keyword} @ {city}")
@@ -294,7 +306,7 @@ def run(keyword="Java开发", city="北京", pages=3, salary="", experience="",
     if stage: filter_desc.append(f"融资={stage}")
     if filter_desc:
         print(f"  筛选: {', '.join(filter_desc)}")
-    print(f"  目标: {pages} 页")
+    print(f"  目标: {pages} 页 | 数据源: API")
     print(f"{'='*60}\n")
 
     ctx = launch_persistent_context(
@@ -308,9 +320,9 @@ def run(keyword="Java开发", city="北京", pages=3, salary="", experience="",
 
     page = ctx.new_page()
 
-    # 1. 先访问第一页，检查登录状态
-    params["page"] = 1
-    first_url = f"{BOSS_URL}/web/geek/jobs?{urlencode(params)}"
+    # 1. 打开搜索页，触发登录检测
+    search_params = {"query": keyword, "city": city_code, "page": 1}
+    first_url = f"{BOSS_URL}/web/geek/jobs?{urlencode(search_params)}"
     print(f"[*] 正在打开: {first_url}")
     page.goto(first_url, wait_until="domcontentloaded", timeout=60000)
     time.sleep(5)
@@ -328,19 +340,24 @@ def run(keyword="Java开发", city="北京", pages=3, salary="", experience="",
     else:
         print("[+] 已登录，开始爬取")
 
-    # 2. 逐页爬取
+    # 2. 逐页通过 API 获取列表数据
     all_jobs = []
     seen_links = set()
 
     for page_num in range(1, pages + 1):
-        if page_num > 1:
-            params["page"] = page_num
-            url = f"{BOSS_URL}/web/geek/jobs?{urlencode(params)}"
-            print(f"\n[*] 第 {page_num} 页: {url}")
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            time.sleep(4)
+        print(f"\n[*] 第 {page_num} 页 (API)...")
 
-        jobs = _extract_jobs(page)
+        jobs = _fetch_list_via_api(page, keyword, city_code, page_num, api_filters)
+
+        if not jobs:
+            # API 失败，尝试 HTML fallback（仅第一页时页面已加载）
+            if page_num == 1:
+                print("[*] API 无数据，尝试 HTML fallback...")
+                jobs = _extract_jobs_fallback(page)
+            else:
+                print(f"[-] 第 {page_num} 页无数据，停止翻页")
+                break
+
         new_count = 0
         for job in jobs:
             link = job.get("link", "")
@@ -349,23 +366,22 @@ def run(keyword="Java开发", city="北京", pages=3, salary="", experience="",
                 all_jobs.append(job)
                 new_count += 1
 
-        print(f"[+] 第 {page_num} 页: 找到 {len(jobs)} 个, 新增 {new_count} 个 (总计 {len(all_jobs)})")
+        print(f"[+] 第 {page_num} 页: API 返回 {len(jobs)} 个, 新增 {new_count} 个 (总计 {len(all_jobs)})")
 
         if not jobs:
             print(f"[-] 第 {page_num} 页无数据，停止翻页")
             break
 
-        # 页间延迟，避免触发频率限制
         if page_num < pages:
             delay = 2 + (page_num % 3)
             print(f"[*] 等待 {delay} 秒...")
             time.sleep(delay)
 
-    # 3. 抓取 JD 详情
+    # 3. 抓取详情页（JD 文本 + 工作地址）
     if fetch_detail and all_jobs:
         _enrich_with_details(ctx, all_jobs)
 
-    # 4. 保存结果
+    # 4. 保存 cookies 和结果
     cookies = ctx.cookies()
     with open(COOKIES_FILE, "w") as f:
         json.dump(cookies, f, ensure_ascii=False, indent=2)

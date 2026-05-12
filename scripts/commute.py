@@ -196,3 +196,32 @@ def calculate_commute(from_addr, to_addr, mode="driving"):
         _save_cache(cache)
     time.sleep(0.25)
     return result
+
+
+def calculate_commute_gps(from_addr, to_gps, mode="driving"):
+    """
+    用住址 + 工作地 GPS 坐标计算通勤（跳过工作地址地理编码）。
+
+    to_gps: {"lat": float, "lng": float}（Boss API 返回的 gps 字段）
+    """
+    from_loc = geocode(from_addr)
+    if not from_loc:
+        return None
+
+    to_loc = {"lat": to_gps["lat"], "lng": to_gps["lng"], "city": from_loc.get("city", "")}
+
+    cache = _load_cache()
+    cache_key = f"route:{_provider}:{mode}:gps:{from_loc['lat']},{from_loc['lng']}→{to_gps['lat']},{to_gps['lng']}"
+    if cache_key in cache:
+        return cache[cache_key]
+
+    if _provider == "amap":
+        result = _amap_route(from_loc, to_loc, mode)
+    else:
+        result = _tencent_route(from_loc, to_loc, mode)
+
+    if result:
+        cache[cache_key] = result
+        _save_cache(cache)
+    time.sleep(0.25)
+    return result

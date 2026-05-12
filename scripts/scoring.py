@@ -26,7 +26,7 @@ except ImportError:
     sys.exit("需要 openpyxl: pip3 install openpyxl")
 
 try:
-    from commute import configure as _commute_configure, calculate_commute
+    from commute import configure as _commute_configure, calculate_commute, calculate_commute_gps
     _HAS_COMMUTE = True
 except ImportError:
     _HAS_COMMUTE = False
@@ -88,16 +88,27 @@ def extract_experience_years(tags):
     return 0
 
 
-def score_skills(job_text, resume_skills):
-    """技能匹配评分 (0-35)"""
+def score_skills(job_text, resume_skills, api_skills=None):
+    """技能匹配评分 (0-35)
+    api_skills: 平台 API 返回的 skills 字段（岗位明确要求的技能列表）
+    无 api_skills 时，用简历技能在 JD 文本中做简单匹配
+    """
     if not resume_skills:
-        return 21, [], []  # 无技能信息，给及格分
+        return 21, [], []
 
     text_lower = job_text.lower()
     resume_lower = [s.lower() for s in resume_skills]
+    resume_lower_set = set(resume_lower)
 
-    matched = [s for s in resume_skills if s.lower() in text_lower]
-    # 缺失不计算（因为无法从有限的卡片信息判断完整 JD 要求）
+    if api_skills:
+        matched = [s for s in resume_skills
+                   if any(s.lower() in ask.lower() or ask.lower() in s.lower()
+                          for ask in api_skills)]
+        missing = [s for s in api_skills
+                   if not any(rl in s.lower() or s.lower() in rl for rl in resume_lower_set)]
+    else:
+        matched = [s for s in resume_skills if s.lower() in text_lower]
+        missing = []
 
     ratio = len(matched) / len(resume_skills) if resume_skills else 0
     score = 35 * ratio
@@ -106,7 +117,7 @@ def score_skills(job_text, resume_skills):
         score = 35 * (0.7 + 0.3 * ratio)
     score = min(score, 35)
 
-    return round(score), matched, []
+    return round(score), matched, missing
 
 
 def score_salary(salary_data, expected_min, expected_max):
@@ -150,6 +161,29 @@ def score_city(location, preferred_cities):
         if city in (location or ""):
             return 15, f"期望城市({city})"
     return 6, "非期望城市"
+
+
+def score_degree(job_degree, user_degree):
+    """学历匹配评分 (0-10)，软匹配不硬卡"""
+    _DEGREE_LEVEL = {
+        "博士": 5, "硕士": 4, "本科": 3, "大专": 2,
+        "中专": 1, "中技": 1, "高中": 0,
+    }
+
+    if not job_degree or "不限" in job_degree:
+        return 10, "无要求"
+    if not user_degree:
+        return 7, f"要求{job_degree}，未知用户学历"
+
+    req_level = _DEGREE_LEVEL.get(job_degree, 0)
+    user_level = _DEGREE_LEVEL.get(user_degree, 0)
+
+    if user_level >= req_level:
+        return 10, f"满足({user_degree}≥{job_degree})"
+    elif user_level == req_level - 1:
+        return 6, f"略低({user_degree}，要求{job_degree})"
+    else:
+        return 3, f"差距较大({user_degree}，要求{job_degree})"
 
 
 def score_company(job):
@@ -196,7 +230,11 @@ def score_commute(commute_data, max_commute=60):
 
 
 def score_job(job, resume_skills, config, commute_data=None):
-    """对单个职位打分，返回各维度分数"""
+    """对单个职位打分，返回各维度分数
+
+    评分思路：技能匹配是基础门槛，其他维度是在"能被录用"前提下的加分项。
+    技能匹配率作为乘数影响总分，避免"大厂高薪但不匹配"的岗位拿到虚高分。
+    """
     salary_data = parse_salary(job.get("salary", ""))
 
     # 合并所有可用的岗位文本信息
@@ -214,35 +252,57 @@ def score_job(job, resume_skills, config, commute_data=None):
     expected_min = config.get("salary_min", 0)
     expected_max = config.get("salary_max", 999999)
     cities = config.get("cities", [])
+    user_degree = config.get("user_degree", "")
 
-    sk_score, matched, missing = score_skills(job_text, resume_skills)
+    api_skills = job.get("skills", [])
+    sk_score, matched, missing = score_skills(job_text, resume_skills, api_skills=api_skills)
     sa_score, sa_desc = score_salary(salary_data, expected_min, expected_max)
     ex_score, ex_desc = score_experience(required_years, user_years)
+    dg_score, dg_desc = score_degree(job.get("job_degree", ""), user_degree)
     ci_score, ci_desc = score_city(job.get("location", ""), cities)
     co_score, co_desc = score_company(job)
 
     cm_score, cm_desc = score_commute(commute_data, config.get("max_commute_time", 60))
 
-    # 权重: 技能30% 薪资20% 通勤15% 经验15% 城市10% 公司10%
-    total = round(
-        (sk_score / 35) * 100 * 0.30 +
-        (sa_score / 20) * 100 * 0.20 +
+    # 基础分 = 其他维度的加权平均（不含技能）
+    # 权重: 薪资25% 经验20% 通勤15% 城市15% 公司10% 学历15%
+    base = (
+        (sa_score / 20) * 100 * 0.25 +
+        (ex_score / 15) * 100 * 0.20 +
+        (dg_score / 10) * 100 * 0.15 +
         (cm_score / 15) * 100 * 0.15 +
-        (ex_score / 15) * 100 * 0.15 +
-        (ci_score / 15) * 100 * 0.10 +
-        (co_score / 15) * 100 * 0.10,
-        1
+        (ci_score / 15) * 100 * 0.15 +
+        (co_score / 15) * 100 * 0.10
     )
+
+    # 技能匹配率 → 乘数
+    # 匹配率 100% → 乘数 1.0
+    # 匹配率 70%  → 乘数 0.8
+    # 匹配率 40%  → 乘数 0.4
+    # 匹配率 < 30% → 乘数 0.15（几乎不可能被录用）
+    skill_ratio = sk_score / 35
+    if skill_ratio >= 0.7:
+        multiplier = 0.5 + 0.5 * skill_ratio  # 0.85 ~ 1.0
+    elif skill_ratio >= 0.4:
+        multiplier = 0.3 + 0.5 * skill_ratio  # 0.5 ~ 0.85
+    else:
+        multiplier = 0.15 + 0.3 * skill_ratio  # 0.15 ~ 0.42
+
+    total = round(base * multiplier, 1)
 
     return {
         "total": total,
         "skill_score": sk_score, "skill_matched": matched, "skill_missing": missing,
         "salary_score": sa_score, "salary_desc": sa_desc,
         "exp_score": ex_score, "exp_desc": ex_desc,
+        "degree_score": dg_score, "degree_desc": dg_desc,
         "city_score": ci_score, "city_desc": ci_desc,
         "company_score": co_score, "company_desc": co_desc,
         "commute_score": cm_score, "commute_desc": cm_desc,
         "commute_data": commute_data,
+        "job_degree": job.get("job_degree", ""),
+        "api_skills": job.get("skills", []),
+        "skill_multiplier": round(multiplier, 2),
     }
 
 
@@ -258,9 +318,9 @@ def generate_excel(scored_jobs, config):
     ws.title = "职位推荐"
 
     headers = [
-        "排名", "岗位名称", "公司名称", "薪资", "地点",
-        "综合评分", "技能匹配度", "薪资评分", "通勤评分", "经验匹配度", "城市匹配度", "公司质量",
-        "通勤时间", "通勤距离", "匹配技能", "缺失技能", "经验要求", "Boss在线",
+        "推荐", "排名", "岗位名称", "公司名称", "薪资", "地点",
+        "综合评分", "技能匹配度", "技能乘数", "薪资评分", "通勤评分", "经验匹配度", "学历匹配度", "城市匹配度", "公司质量",
+        "通勤时间", "通勤距离", "匹配技能", "缺失技能", "岗位要求技能", "经验要求", "学历要求", "Boss在线",
         "公司行业", "公司规模", "融资阶段",
         "工作地址",
         "岗位链接",
@@ -283,7 +343,6 @@ def generate_excel(scored_jobs, config):
         cell.alignment = header_align
         cell.border = thin_border
 
-    exclude = config.get("exclude_keywords", [])
     row_idx = 2
 
     for rank, item in enumerate(scored_jobs, 1):
@@ -291,10 +350,8 @@ def generate_excel(scored_jobs, config):
         s = item["scores"]
         text = f"{job.get('title', '')} {job.get('company', '')} {' '.join(job.get('tags', []))}"
 
-        if any(ex in text for ex in exclude):
-            continue
-
         row_data = [
+            "★" if s.get("recommend") == "strong" else "",
             rank,
             job.get("title", ""),
             job.get("company", ""),
@@ -302,16 +359,20 @@ def generate_excel(scored_jobs, config):
             job.get("location", ""),
             s["total"],
             f"{s['skill_score']}/35",
+            f"{s.get('skill_multiplier', 0):.0%}",
             f"{s['salary_score']}/20",
             f"{s['commute_score']}/15",
             f"{s['exp_score']}/15",
+            f"{s['degree_score']}/10",
             f"{s['city_score']}/15",
             f"{s['company_score']}/15",
             s.get("commute_desc", ""),
             f"{s['commute_data']['distance_km']}km" if s.get("commute_data") else "",
             ", ".join(s.get("skill_matched", [])),
             ", ".join(s.get("skill_missing", [])),
+            ", ".join(s.get("api_skills", [])),
             s.get("exp_desc", ""),
+            s.get("job_degree", ""),
             "是" if job.get("online") else "否",
             job.get("company_industry", ""),
             job.get("company_size", ""),
@@ -334,12 +395,12 @@ def generate_excel(scored_jobs, config):
         row_idx += 1
 
     col_widths = {
-        1: 6, 2: 30, 3: 20, 4: 16, 5: 20, 6: 10,
-        7: 12, 8: 10, 9: 10, 10: 12, 11: 12, 12: 10,
-        13: 16, 14: 10,
-        15: 30, 16: 30, 17: 16, 18: 10,
-        19: 14, 20: 14, 21: 14,
-        22: 30, 23: 50,
+        1: 5, 2: 6, 3: 30, 4: 20, 5: 16, 6: 20, 7: 10,
+        8: 12, 9: 8, 10: 10, 11: 10, 12: 12, 13: 10, 14: 12, 15: 10,
+        16: 16, 17: 10,
+        18: 30, 19: 30, 20: 30, 21: 16, 22: 10, 23: 10,
+        24: 14, 25: 14, 26: 14,
+        27: 30, 28: 50,
     }
     for col, width in col_widths.items():
         ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = width
@@ -359,6 +420,7 @@ def main():
     parser.add_argument("--salary-min", type=int, default=0, help="期望最低月薪")
     parser.add_argument("--salary-max", type=int, default=999999, help="期望最高月薪")
     parser.add_argument("--work-years", type=int, default=0, help="工作年限")
+    parser.add_argument("--user-degree", default="", help="用户学历（如：本科、硕士）")
     parser.add_argument("--exclude", default="", help="排除关键词（逗号分隔）")
     parser.add_argument("--home-address", default="", help="住址（用于通勤计算）")
     parser.add_argument("--map-key", default="", help="地图 API Key（腾讯或高德）")
@@ -382,6 +444,7 @@ def main():
         "salary_min": args.salary_min,
         "salary_max": args.salary_max,
         "work_years": args.work_years,
+        "user_degree": args.user_degree,
         "exclude_keywords": exclude,
         "home_address": args.home_address,
         "max_commute_time": args.max_commute,
@@ -404,9 +467,38 @@ def main():
     print(f"  期望薪资: {args.salary_min}-{args.salary_max}")
     print(f"{'='*60}\n")
 
-    # Pass 1: 初步评分（不含通勤）
-    scored_jobs = []
+    # Pass 0: 硬过滤 — 淘汰明显不合适的岗位
+    filtered_jobs = []
+    hard_exclude_reasons = {"salary_low": 0, "exclude_kw": 0, "industry": 0}
+
     for job in jobs:
+        # 1. 薪资过低：岗位薪资上限低于用户期望下限
+        salary_data = parse_salary(job.get("salary", ""))
+        if salary_data and args.salary_min > 0:
+            if salary_data["max"] < args.salary_min * 0.7:
+                hard_exclude_reasons["salary_low"] += 1
+                continue
+
+        # 2. 排除关键词命中（标题 + 公司 + 标签）
+        text = " ".join([
+            job.get("title", ""), job.get("company", ""),
+            " ".join(job.get("tags", [])),
+        ])
+        if any(ex in text for ex in exclude):
+            hard_exclude_reasons["exclude_kw"] += 1
+            continue
+
+        filtered_jobs.append(job)
+
+    excluded_total = len(jobs) - len(filtered_jobs)
+    if excluded_total > 0:
+        print(f"  硬过滤: 淘汰 {excluded_total} 个（薪资过低: {hard_exclude_reasons['salary_low']}, "
+              f"排除词: {hard_exclude_reasons['exclude_kw']}）")
+        print(f"  剩余候选: {len(filtered_jobs)} 个\n")
+
+    # Pass 1: 评分（不含通勤）
+    scored_jobs = []
+    for job in filtered_jobs:
         scores = score_job(job, resume_skills, config)
         scored_jobs.append({"job": job, "scores": scores})
 
@@ -423,10 +515,17 @@ def main():
             if not work_addr:
                 continue
             try:
-                commute_data = calculate_commute(
-                    args.home_address, work_addr,
-                    mode=args.commute_mode,
-                )
+                gps = item["job"].get("gps")
+                if gps and gps.get("lat") and gps.get("lng"):
+                    commute_data = calculate_commute_gps(
+                        args.home_address, gps,
+                        mode=args.commute_mode,
+                    )
+                else:
+                    commute_data = calculate_commute(
+                        args.home_address, work_addr,
+                        mode=args.commute_mode,
+                    )
                 if commute_data:
                     item["scores"] = score_job(item["job"], resume_skills, config, commute_data=commute_data)
             except Exception as e:
@@ -438,22 +537,32 @@ def main():
     # 按总分降序
     scored_jobs.sort(key=lambda x: x["scores"]["total"], reverse=True)
 
-    # 生成 Excel
+    # 百分位推荐：先淘汰明显不合适的，再取 top N%
+    # 淘汰条件：技能乘数 < 0.2（几乎不可能被录用）
+    viable_jobs = [j for j in scored_jobs if j["scores"].get("skill_multiplier", 1) >= 0.2]
+    pruned = len(scored_jobs) - len(viable_jobs)
+
+    top_n = max(5, int(len(viable_jobs) * 0.10))  # 至少5个，取前10%
+    highly = viable_jobs[:top_n]
+
+    for item in highly:
+        item["scores"]["recommend"] = "strong"
+
+    # 生成 Excel（包含所有 viable，标记推荐等级）
     excel_path = generate_excel(scored_jobs, config)
 
-    highly = sum(1 for j in scored_jobs if j["scores"]["total"] >= 80)
-    medium = sum(1 for j in scored_jobs if 60 <= j["scores"]["total"] < 80)
-
     print(f"{'='*60}")
-    print(f"  强烈推荐(80+): {highly} | 值得考虑(60-80): {medium}")
+    print(f"  总职位: {len(scored_jobs)} | 淘汰(不匹配): {pruned} | 有效候选: {len(viable_jobs)}")
+    print(f"  强烈推荐(top 10%, {len(highly)}个) | 其余候选: {len(viable_jobs) - len(highly)}个")
     print(f"  Excel: {excel_path}")
     print(f"{'='*60}")
 
-    for i, item in enumerate(scored_jobs[:10], 1):
+    for i, item in enumerate(highly[:15], 1):
         j = item["job"]
         s = item["scores"]
-        print(f"  {i:2d}. [{s['total']:5.1f}] {j.get('title', '')} - {j.get('company', '')}")
-        print(f"      {j.get('salary', '')} | {j.get('location', '')}")
+        marker = "★" if i <= max(3, int(len(viable_jobs) * 0.03)) else " "
+        print(f"  {marker}{i:2d}. [{s['total']:5.1f}] {j.get('title', '')} - {j.get('company', '')}")
+        print(f"       {j.get('salary', '')} | {j.get('location', '')} | 技能匹配×{s.get('skill_multiplier', 0):.0%}")
 
     return excel_path
 
